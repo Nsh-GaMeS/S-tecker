@@ -6,6 +6,7 @@ from selenium.webdriver.chrome.options import Options
 import time
 import os
 from dotenv import load_dotenv
+from reader import start_quiz
 
 load_dotenv()
 
@@ -31,6 +32,8 @@ driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
         })
     '''
 })
+
+# This is part 1 - Login and navigate to all modules page
 
 # Open s-tec login page
 driver.get("https://na.s-tec.shimano.com/login")
@@ -67,6 +70,9 @@ all_modules_option = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="
 all_modules_option.click()
 print("Clicked all modules option")
 
+
+# This is part 2 - Collect and save all module links
+
 # wait for the all modules page to load by waiting for the modules section to appear
 module_links_section = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#modules > div > div")))
 print("All modules page loaded")
@@ -91,6 +97,10 @@ print("Collected module links:")
 for href in module_hrefs:
     print(href)
 
+# This is part 3 - Open a module link in a new tab and start the quiz
+# side note - adding a progress bar would be cool.
+# for href in module_hrefs:
+start_quiz(driver, module_hrefs[0])
 
 # Keep browser open to inspect
 input("\nPress Enter to close browser...")
