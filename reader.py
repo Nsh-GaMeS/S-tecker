@@ -33,18 +33,23 @@ def start_quiz(driver, module_url):
         if sliders:
             slider = sliders[0]  # Use the first found slider
             
-            driver.execute_script(
-                "arguments[0].setAttribute('aria-valuenow', arguments[0].getAttribute('aria-valuemax'));"
-                "arguments[0].dispatchEvent(new Event('change'));",
-                slider
-            )
+            # driver.execute_script(
+            #     "arguments[0].setAttribute('aria-valuenow', arguments[0].getAttribute('aria-valuemax'));"
+            #     "arguments[0].dispatchEvent(new Event('change'));",
+            #     slider
+            # )
 
-            # action = ActionChains(driver)
-            # # Get the slider width
-            # width = slider.size['width']  # Move further to ensure it reaches the end
-            # # Drag the slider handle to the far right
-            # action.click_and_hold(slider).move_by_offset(width * 2, 0).release().perform()
+            action = ActionChains(driver)
+            # Get the slider width
+            width = slider.size['width']  # Move further to ensure it reaches the end
+            # Drag the slider handle to the far right
+            action.click_and_hold(slider).move_by_offset(width/2, 0).release().perform()
             
+            time.sleep(2)  # wait a moment to give the video time to render in a bit more
+        
+            # then once it fully loads, try dragging again to ensure it reaches the end
+            action.click_and_hold(slider).move_by_offset(width/2, 0).release().perform()
+
             print(f"Skipped video for module: {module_url}")
         else:
             print(f"No slider found to skip video for module: {module_url}")
