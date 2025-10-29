@@ -1,0 +1,102 @@
+
+        var lastAnswerCorrect = null;
+
+        $(document).ready(function(){
+            var already_submitted = false;
+            //handle form submit, display dialog with correct answer before submitting.
+            $('#fakesubmit').click(function(event) {
+                
+                //$('span.check').remove();
+                var correctAnswer = null;
+                var correctAnswerText = '';
+                correctAnswer = 261125;correctAnswerText = "True";
+                var answer = $('input[name=answer]:checked', '#question').val();
+                if (answer === undefined ) {
+                    //need to add something for when user did not select an answer to the question
+                    console.log('no answer selected');
+                } else {
+                    already_submitted = true;
+                    $('#fakesubmit').remove();
+                    $("input[type=radio]").attr('disabled', true);
+                    var answerText = '';
+                    if(answer == correctAnswer) {
+                        lastAnswerCorrect = true;
+                        answerText = '<div class="answer-feedback-wrap"><div class="answer-feedback-title">Answer Feedback</div><div class="correct-answer">Correct!</div></div>';
+                    } else {
+                        lastAnswerCorrect = false;
+                        //console.log(correctAnswerText);
+                        answerText = '<div class="answer-feedback-wrap"><div class="answer-feedback-title">Answer Feedback</div><p class="incorrect-answer">Sorry, that is incorrect. The correct answer is:</p><p class="incorrect-answer">' + correctAnswerText + '</p><div class="answer-feedback-btn-wrap"></div></div>';
+                        //answerText = '<div class="answer-feedback-wrap"><div class="answer-feedback-title">Answer Feedback</div><p>Sorry, that is incorrect. The correct answer is:</p><p>' + correctAnswerText + '</p><div class="answer-feedback-btn-wrap"><a onclick="$(\'#realsubmit\').trigger(\'click\');$(\'#answerDialog1\').hide();" class="proceed-next-answer black-outlined-btn">Next Question</a></div></div>';
+                        //answerText = '<div class="answer-feedback-wrap"><div class="answer-feedback-title">Answer Feedback</div><div class="correct-answer">Incorrect</div></div>';
+                    }
+                    $('#answerDialog1').html(answerText);
+                    $('#answerDialog1').show();
+
+                    /*$('#answerDialog1').dialog({
+                        modal : true,
+                        width: '315px',
+                        closeOnEscape: false,
+                        open: function(event, ui) { $(".ui-dialog-titlebar-close", this.parentNode).hide(); }, //hides close button
+                        buttons: [{
+                            text: "Next Question",
+                            click: function() {
+                                $('#answerDialog1').dialog('close');
+                                //submit the form for real...
+                                // but only if the answer is incorrect - we auto-submit below
+                                // and we don't want to submit twice in case it's the last question
+                                // because that confuses the quiz session mechanism and starts the quiz over again
+                                if(answer != correctAnswer) {
+                                    $('#realsubmit').trigger('click');
+                                }
+                            }
+                        }]
+                    });*/
+
+                    /*$('#answerDialog1').dialog('open');*/
+
+                    //if answer correct, auto-submit
+                    //if(answer == correctAnswer) {
+                        //auto submitting no matter if correct or incorrect
+                        setTimeout(function () {
+                            $('#realsubmit').trigger('click');
+                        }, 100);
+                    //}
+                    return false;
+                }
+            });
+
+            $("#realsubmit").click(function(e) {
+                //console.log(lastAnswerCorrect, lastAnswerCorrect ? 1000 : 3000)
+                setTimeout(function () {
+                    $.ajax({
+                        type: "POST",
+                        url: "/module/ajaxquiz/10483219/",
+                        data: {
+                            answer: $("input[name=answer]:checked", "#question").val(),
+                            question_id: $("input[name=question_id]", "#question").val(),
+                            question_counter: $("input[name=question_counter]", "#question").val(),
+                            question_retake: $("input[name=question_retake]", "#question").val(),
+                            submit_type: $("input[name=submit_type]", "#question").val(),
+                        },
+                        dataType: "text",
+                        cache:false,
+                        success: function(data){
+                            $("#quiz-content").html(data);
+                        }
+                    });
+                }, lastAnswerCorrect ? 1000 : 3000);
+
+                //e.preventDefault();
+                //return false supercedes preventDefault()
+                return false;
+            });
+
+            $('form#question label').on('click',function() {
+                if(already_submitted == true){return false;}
+                if (!$(this).hasClass('checked')) {
+                    $('form#question label').removeClass('checked');
+                    $(this).addClass('checked');
+                }
+            });
+
+        });

@@ -99,8 +99,9 @@ for href in module_hrefs:
 
 # This is part 3 - Open a module link in a new tab and start the quiz
 # side note - adding a progress bar would be cool.
+offset = 4
 # for href in module_hrefs:
-start_quiz(driver, module_hrefs[0])
+start_quiz(driver, module_hrefs[0 + offset])
 
 # Keep browser open to inspect
 input("\nPress Enter to close browser...")
