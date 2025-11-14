@@ -101,8 +101,13 @@ for href in module_hrefs:
 # side note - adding a progress bar would be cool.
 offset = 4
 # for href in module_hrefs:
-start_quiz(driver, module_hrefs[0 + offset])
+for module in module_hrefs[::offset]:
+    start_quiz(driver, module)
+    print(f"Completed module: {module}")
+    # Optional: Add a delay between modules to mimic human behavior
+    time.sleep(5)
 
 # Keep browser open to inspect
 input("\nPress Enter to close browser...")
 driver.quit()
+

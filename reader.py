@@ -74,38 +74,78 @@ def start_quiz(driver, module_url):
             driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
             driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
 
-
-
-
             print(f"Skipped video for module: {module_url}")
         else:
             print(f"No slider found to skip video for module: {module_url}")
+        time.sleep(3)  # wait a moment for the quiz button to appear
 
+        # click the button to start the quiz
+        quiz_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
+        quiz_btn.click()
 
     except Exception as e:
         print(f"Error starting quiz for module {module_url}: {e}")
 
-    for _ in range(5):  # assuming there are 5 questions per quiz
-        do_question(driver, wait, module_url)
+
+
+    # # find how many quiz questions there are, then call do_question that many times
+    # try:
+    #     # try checking if the quiz is over instead
+    #     step_indicator = wait.until(EC.presence_of_element_located((By.XPATH, "//*[@id='question-form']/div[1]/div")))
+    #     total_questions_text = step_indicator.text.strip()  # e.g. "Question 1 of 5"
+    #     total_questions = int(total_questions_text.split(" of ")[1])
+    #     print(f"Total questions in quiz: {total_questions}")
+    #     for _ in range(total_questions):
+    #         do_question(driver, wait, module_url)
+    # except Exception as e:
+    #     print(f"Error determining total questions for module {module_url}: {e}")
+    
+    # Alternatively, just attempt questions until we hit an error (quiz end)
+    while True:
+        try:
+            more = do_question(driver, wait, module_url)
+            if not more:
+                print(f"Finished all questions for module: {module_url}")
+                break
+            else:
+                time.sleep(2)  # brief pause between questions
+                
+        except Exception as e:
+            print(f"Finished quiz or encountered error for module {module_url}: {e}")
+            break
+        
+
 
 def extract_correct_answer(html_content):
     # Regular expression to find the correctAnswerText variable
     match = re.search(r'correctAnswerText\s*=\s*"([^"]+)";', html_content)
     if match:
-        return match.group(1)  # Return the value of correctAnswerText
+        return match.group(1)  # Return the value(not the key/id of the element) of correctAnswerText
     return None
 
 def do_question(driver, wait, module_url):
     try:
         # wait for quiz start button to appear and click it
-        quiz_start_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
-        quiz_start_btn.click()
-        print(f"Started quiz for module: {module_url}")
+        # quiz_start_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
+        # quiz_start_btn.click()
+        # print(f"Started quiz for module: {module_url}")
 
         # now we are in the quiz, we need to find the correct answer from the page source
         html_content = driver.page_source        
         correct_answer_text = extract_correct_answer(html_content)
         print(f"Correct answer text: {correct_answer_text}")
+
+        if correct_answer_text is None:
+            handles = driver.window_handles
+            current = driver.current_window_handle
+            # If there's another window (module tab), close the current module tab and switch back to the main window
+            if len(handles) > 1 and current != handles[0]:
+                driver.close()
+                driver.switch_to.window(handles[0])
+            else:
+                # Ensure we're focused on the main window
+                driver.switch_to.window(handles[0])
+            return None # Exit if no correct answer found
 
         # Find the choices (<ol class="choices"> li items) and click the matching one.
         # Some pages require clicking the inner <span> inside the label, so prefer that.
