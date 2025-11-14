@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import time
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import NoSuchWindowException, StaleElementReferenceException, TimeoutException, NoSuchElementException
 import re
 
 def start_quiz(driver, module_url):
@@ -24,7 +25,8 @@ def start_quiz(driver, module_url):
         play_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#course-poster > div > div")))
         play_button.click()
 
-        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
+        # driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
+        # driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
         time.sleep(1)  # wait a moment for the video to start playing
 
         # player_play_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#w-vulcan-v2-106 > div > div > button"))) <- this is the play/pause button that shows up if you one the video in a different tab. 
@@ -83,6 +85,22 @@ def start_quiz(driver, module_url):
         quiz_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
         quiz_btn.click()
 
+    except NoSuchWindowException as e:
+        print(f"Error starting quiz for module {module_url}: target window already closed: {e}")
+        # try to recover: switch to first available window and load the module there
+        handles = driver.window_handles
+        if not handles:
+            print("No browser windows available, aborting module.")
+            return
+        try:
+            driver.switch_to.window(handles[0])
+            driver.get(module_url)
+            wait = WebDriverWait(driver, 10)
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
+        except Exception as e2:
+            print(f"Recovery attempt failed for module {module_url}: {e2}")
+            return
+
     except Exception as e:
         print(f"Error starting quiz for module {module_url}: {e}")
 
@@ -113,7 +131,8 @@ def start_quiz(driver, module_url):
         except Exception as e:
             print(f"Finished quiz or encountered error for module {module_url}: {e}")
             break
-        
+        # more = do_question(driver, wait, module_url)
+    return
 
 
 def extract_correct_answer(html_content):
@@ -125,13 +144,8 @@ def extract_correct_answer(html_content):
 
 def do_question(driver, wait, module_url):
     try:
-        # wait for quiz start button to appear and click it
-        # quiz_start_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
-        # quiz_start_btn.click()
-        # print(f"Started quiz for module: {module_url}")
-
         # now we are in the quiz, we need to find the correct answer from the page source
-        html_content = driver.page_source        
+        html_content = driver.page_source
         correct_answer_text = extract_correct_answer(html_content)
         print(f"Correct answer text: {correct_answer_text}")
 
@@ -140,88 +154,238 @@ def do_question(driver, wait, module_url):
             current = driver.current_window_handle
             # If there's another window (module tab), close the current module tab and switch back to the main window
             if len(handles) > 1 and current != handles[0]:
-                driver.close()
-                driver.switch_to.window(handles[0])
+                try:
+                    driver.close()
+                except Exception:
+                    pass
+                try:
+                    driver.switch_to.window(handles[0])
+                except Exception:
+                    pass
             else:
                 # Ensure we're focused on the main window
-                driver.switch_to.window(handles[0])
-            return None # Exit if no correct answer found
+                try:
+                    driver.switch_to.window(handles[0])
+                except Exception:
+                    pass
+            return False  # Explicitly signal quiz finished
 
-        # Find the choices (<ol class="choices"> li items) and click the matching one.
-        # Some pages require clicking the inner <span> inside the label, so prefer that.
-        try:
-            choices = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ol.choices li")))
-        except Exception:
-            choices = driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
+        # Helper to safely get choice elements with retries
+        def get_choices(retries=3, delay=0.5):
+            for _ in range(retries):
+                try:
+                    return wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ol.choices li")))
+                except (StaleElementReferenceException, TimeoutException):
+                    time.sleep(delay)
+            # final attempt without wait
+            return driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
 
+        # Try a few times in case the DOM refreshes while we iterate/click
         target = (correct_answer_text or "").strip().lower()
         clicked = False
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            choices = get_choices()
+            if not choices:
+                time.sleep(0.5)
+                continue
 
-        for li in choices:
-            try:
-                li_text = li.text.strip().lower()
-            except Exception:
-                li_text = ""
-
-            if target and target in li_text:
-                # Prefer clicking the inner <span> (works in the site HTML you provided)
+            for li in choices:
                 try:
-                    span = li.find_element(By.CSS_SELECTOR, "label > span")
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span)
-                    driver.execute_script("arguments[0].click();", span)
-                    print(f"Clicked span for correct answer: {correct_answer_text}")
-                except Exception:
-                    # Fallbacks: label, then li, then input
+                    li_text = li.text.strip().lower()
+                except StaleElementReferenceException:
+                    # stale - restart outer attempt
+                    li_text = ""
+                    break
+
+                if target and target in li_text:
+                    # Try clicking with resilience to stale references
                     try:
-                        label = li.find_element(By.CSS_SELECTOR, "label")
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", label)
-                        driver.execute_script("arguments[0].click();", label)
-                        print(f"Clicked label for correct answer: {correct_answer_text}")
+                        span = li.find_element(By.CSS_SELECTOR, "label > span")
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span)
+                        driver.execute_script("arguments[0].click();", span)
+                        print(f"Clicked span for correct answer: {correct_answer_text}")
+                    except (StaleElementReferenceException, NoSuchElementException):
+                        # Re-find the specific li and retry a JS click sequence
+                        try:
+                            # re-find the list items fresh and find the matching one by text
+                            fresh = driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
+                            for f in fresh:
+                                try:
+                                    if target in f.text.strip().lower():
+                                        try:
+                                            label = f.find_element(By.CSS_SELECTOR, "label")
+                                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", label)
+                                            driver.execute_script("arguments[0].click();", label)
+                                        except Exception:
+                                            try:
+                                                input_el = f.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
+                                                driver.execute_script("arguments[0].click();", input_el)
+                                            except Exception as e:
+                                                print(f"Final fallback click failed: {e}")
+                                        print(f"Clicked fallback element for correct answer: {correct_answer_text}")
+                                        clicked = True
+                                        break
+                                except StaleElementReferenceException:
+                                    continue
+                        except Exception as e:
+                            print(f"Error during fallback click: {e}")
                     except Exception:
+                        # generic fallback attempt on current element
                         try:
                             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", li)
                             driver.execute_script("arguments[0].click();", li)
                             print(f"Clicked li for correct answer: {correct_answer_text}")
-                        except Exception:
-                            try:
-                                input_el = li.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
-                                driver.execute_script("arguments[0].click();", input_el)
-                                print(f"Clicked input for correct answer: {correct_answer_text}")
-                            except Exception as e:
-                                print(f"Failed to click matching choice element: {e}")
-                clicked = True
+                        except Exception as e:
+                            print(f"Failed to click matching choice element: {e}")
+                    clicked = True
+                    break
+
+            if clicked:
                 break
+            else:
+                time.sleep(0.5)  # short pause then retry to account for DOM refresh
 
         if not clicked:
             print(f"No matching choice found for: {correct_answer_text}")
 
-        # for choice in choices:
-        #     try:
-        #         label = choice.find_element(By.TAG_NAME, "label")
-        #         label_text = label.text.strip()
-        #         if correct_answer_text and correct_answer_text.strip() in label_text:
-        #             try:
-        #                 # Prefer normal click on the label (toggles the radio)
-        #                 label.click()
-        #             except Exception:
-        #                 # Fallback to JS click on the input if normal click fails
-        #                 input_el = choice.find_element(By.CSS_SELECTOR, "input[type='radio']")
-        #                 driver.execute_script("arguments[0].click();", input_el)
-        #             print(f"Clicked the correct answer: {label_text}")
-        #             break
-        #     except Exception as e:
-        #         print(f"Failed to process choice element: {e}")
+        # submit the answer with retries to avoid stale element problems
+        submit_clicked = False
+        for _ in range(3):
+            try:
+                submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#fakesubmit")))
+                submit_btn.click()
+                submit_clicked = True
+                break
+            except (StaleElementReferenceException, TimeoutException):
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"Unexpected error clicking submit: {e}")
+                break
 
-        # submit the answer
-        submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#fakesubmit")))
-        submit_btn.click()
+        if not submit_clicked:
+            print("Failed to click submit button (may already be processed).")
 
         print(f"Answered quiz question for module: {module_url}")
 
         time.sleep(7)  # wait a moment as the quiz processes the answer
 
+        return True  # Indicate there may be more questions
+
     except Exception as e:
         print(f"Error during quiz for module {module_url}: {e}")
+        # Let caller handle the termination; return False to move to next module
+        return False
+# def do_question(driver, wait, module_url):
+#     try:
+#         # wait for quiz start button to appear and click it
+#         # quiz_start_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#quiz > div.eov-chooser > a.button-primary.custom-btn.proceed-to-quiz")))
+#         # quiz_start_btn.click()
+#         # print(f"Started quiz for module: {module_url}")
+
+#         # now we are in the quiz, we need to find the correct answer from the page source
+#         html_content = driver.page_source
+#         correct_answer_text = extract_correct_answer(html_content)
+#         print(f"Correct answer text: {correct_answer_text}")
+
+#         if correct_answer_text is None:
+#             handles = driver.window_handles
+#             current = driver.current_window_handle
+#             # If there's another window (module tab), close the current module tab and switch back to the main window
+#             if len(handles) > 1 and current != handles[0]:
+#                 try:
+#                     driver.close()
+#                 except Exception:
+#                     pass
+#                 try:
+#                     driver.switch_to.window(handles[0])
+#                 except Exception:
+#                     pass
+#             else:
+#                 # Ensure we're focused on the main window
+#                 try:
+#                     driver.switch_to.window(handles[0])
+#                 except Exception:
+#                     pass
+#             return False  # Explicitly signal quiz finished
+
+#         # Find the choices (<ol class="choices"> li items) and click the matching one.
+#         # Some pages require clicking the inner <span> inside the label, so prefer that.
+#         try:
+#             choices = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ol.choices li")))
+#         except Exception:
+#             choices = driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
+
+#         target = (correct_answer_text or "").strip().lower()
+#         clicked = False
+
+#         for li in choices:
+#             try:
+#                 li_text = li.text.strip().lower()
+#             except Exception:
+#                 li_text = ""
+
+#             if target and target in li_text:
+#                 # Prefer clicking the inner <span> (works in the site HTML you provided)
+#                 try:
+#                     span = li.find_element(By.CSS_SELECTOR, "label > span")
+#                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span)
+#                     driver.execute_script("arguments[0].click();", span)
+#                     print(f"Clicked span for correct answer: {correct_answer_text}")
+#                 except Exception:
+#                     # Fallbacks: label, then li, then input
+#                     try:
+#                         label = li.find_element(By.CSS_SELECTOR, "label")
+#                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", label)
+#                         driver.execute_script("arguments[0].click();", label)
+#                         print(f"Clicked label for correct answer: {correct_answer_text}")
+#                     except Exception:
+#                         try:
+#                             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", li)
+#                             driver.execute_script("arguments[0].click();", li)
+#                             print(f"Clicked li for correct answer: {correct_answer_text}")
+#                         except Exception:
+#                             try:
+#                                 input_el = li.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
+#                                 driver.execute_script("arguments[0].click();", input_el)
+#                                 print(f"Clicked input for correct answer: {correct_answer_text}")
+#                             except Exception as e:
+#                                 print(f"Failed to click matching choice element: {e}")
+#                 clicked = True
+#                 break
+
+#         if not clicked:
+#             print(f"No matching choice found for: {correct_answer_text}")
+
+#         # for choice in choices:
+#         #     try:
+#         #         label = choice.find_element(By.TAG_NAME, "label")
+#         #         label_text = label.text.strip()
+#         #         if correct_answer_text and correct_answer_text.strip() in label_text:
+#         #             try:
+#         #                 # Prefer normal click on the label (toggles the radio)
+#         #                 label.click()
+#         #             except Exception:
+#         #                 # Fallback to JS click on the input if normal click fails
+#         #                 input_el = choice.find_element(By.CSS_SELECTOR, "input[type='radio']")
+#         #                 driver.execute_script("arguments[0].click();", input_el)
+#         #             print(f"Clicked the correct answer: {label_text}")
+#         #             break
+#         #     except Exception as e:
+#         #         print(f"Failed to process choice element: {e}")
+
+#         # submit the answer
+#         submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#fakesubmit")))
+#         submit_btn.click()
+
+#         print(f"Answered quiz question for module: {module_url}")
+
+#         time.sleep(7)  # wait a moment as the quiz processes the answer
+
+#         return True  # Indicate there may be more questions
+
+#     except Exception as e:
+#         print(f"Error during quiz for module {module_url}: {e}")
 
 def main():
     
