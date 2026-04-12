@@ -10,20 +10,62 @@ from selenium.common.exceptions import NoSuchWindowException, StaleElementRefere
 import re
 
 def start_quiz(driver, module_url):
+    wait = WebDriverWait(driver, 10)
     try:
         # open link in new tab
-        driver.execute_script("window.open('" + module_url + "', '_blank');")
+        driver.execute_script("window.open(arguments[0], '_blank');", module_url)
         driver.switch_to.window(driver.window_handles[-1])
+        print(f"Opened module page: {module_url}")
 
         # wait for page to load
-        wait = WebDriverWait(driver, 10)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
 
         # every module starts with a video, we have to skip it to get to the quiz.
-        
-        #first click the play button to start the video
-        play_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#course-poster > div > div")))
-        play_button.click()
+
+        # Try to start the video, but do not fail startup if the element is hidden/zero-sized.
+        play_started = False
+        play_selectors = [
+            "#course-poster > div > div",
+            "#course-poster [role='button']",
+            "#course-poster",
+            "video"
+        ]
+        for selector in play_selectors:
+            try:
+                candidates = driver.find_elements(By.CSS_SELECTOR, selector)
+                if not candidates:
+                    continue
+                el = candidates[0]
+                if selector != "video":
+                    try:
+                        if el.is_displayed() and el.size.get('width', 0) > 0 and el.size.get('height', 0) > 0:
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+                            el.click()
+                            play_started = True
+                            break
+                    except Exception:
+                        pass
+                    try:
+                        driver.execute_script("arguments[0].click();", el)
+                        play_started = True
+                        break
+                    except Exception:
+                        continue
+                else:
+                    driver.execute_script(
+                        "arguments[0].muted = true;"
+                        "arguments[0].play && arguments[0].play().catch(() => {});",
+                        el,
+                    )
+                    play_started = True
+                    break
+            except Exception:
+                continue
+
+        if play_started:
+            print(f"Started video for module: {module_url}")
+        else:
+            print(f"Could not interact with video poster for module: {module_url}; continuing with skip attempts")
 
         # driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
         # driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
@@ -44,7 +86,7 @@ def start_quiz(driver, module_url):
 
             action = ActionChains(driver)
             # Get the slider width
-            width = slider.size['width']  # Move further to ensure it reaches the end
+            width = slider.size.get('width', 0)
             
             # # Drag the slider handle to halfway first
             # action.click_and_hold(slider).move_by_offset(width/2, 0).release().perform()
@@ -55,11 +97,22 @@ def start_quiz(driver, module_url):
             # driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.SPACE)
 
             try:
-                # Preferred: perform a single drag-and-drop operation which handles press-move-release
-                action.drag_and_drop_by_offset(slider, width, 0).perform()
+                if slider.is_displayed() and width > 1:
+                    # Preferred: perform a single drag-and-drop operation which handles press-move-release
+                    action.drag_and_drop_by_offset(slider, width, 0).perform()
+                else:
+                    raise ValueError("Slider is not interactable")
             except Exception:
-                # Fallback: explicit move-to -> click-and-hold -> move -> release with short pauses
-                action.move_to_element(slider).click_and_hold().pause(0.1).move_by_offset(width - 1, 0).pause(0.1).release().perform()
+                try:
+                    # Fallback: explicit move-to -> click-and-hold -> move -> release with short pauses
+                    action.move_to_element(slider).click_and_hold().pause(0.1).move_by_offset(max(width - 1, 1), 0).pause(0.1).release().perform()
+                except Exception:
+                    # Last fallback: force slider value to max with JS
+                    driver.execute_script(
+                        "arguments[0].setAttribute('aria-valuenow', arguments[0].getAttribute('aria-valuemax') || '100');"
+                        "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
+                        slider,
+                    )
             
             time.sleep(2)  # wait a moment to give the video time to render in a bit more
         
@@ -72,9 +125,12 @@ def start_quiz(driver, module_url):
             
 
 
-            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
-            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
-            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
+            try:
+                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
+                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
+                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ARROW_RIGHT)
+            except Exception:
+                pass
 
             print(f"Skipped video for module: {module_url}")
         else:
@@ -91,18 +147,18 @@ def start_quiz(driver, module_url):
         handles = driver.window_handles
         if not handles:
             print("No browser windows available, aborting module.")
-            return
+            return False
         try:
             driver.switch_to.window(handles[0])
             driver.get(module_url)
-            wait = WebDriverWait(driver, 10)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
         except Exception as e2:
             print(f"Recovery attempt failed for module {module_url}: {e2}")
-            return
+            return False
 
     except Exception as e:
         print(f"Error starting quiz for module {module_url}: {e}")
+        return False
 
 
 
@@ -268,7 +324,7 @@ def do_question(driver, wait, module_url):
 
         print(f"Answered quiz question for module: {module_url}")
 
-        time.sleep(7)  # wait a moment as the quiz processes the answer
+        time.sleep(2)  # wait a moment as the quiz processes the answer
 
         return True  # Indicate there may be more questions
 

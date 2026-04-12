@@ -66,7 +66,21 @@ driver.execute_script("arguments[0].click();", training_dropdown)
 print("Clicked training dropdown")
 
 # click the "all modules" option
-all_modules_option = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="mainNav"]/div/div/div/ul[1]/li[1]/div/ul/li[11]/a')))
+all_modules_xpaths = [
+    '//*[@id="mainNav"]/div/div/div/ul[1]/li[1]/div/ul/li[6]/a',
+    '//*[@id="mainNav"]/div/div/div/ul[1]/li[1]/div/ul/li[11]/a',
+]
+all_modules_option = None
+for xpath in all_modules_xpaths:
+    try:
+        all_modules_option = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+        break
+    except Exception:
+        continue
+
+if all_modules_option is None:
+    raise RuntimeError("Could not find the All Modules menu option")
+
 all_modules_option.click()
 print("Clicked all modules option")
 
