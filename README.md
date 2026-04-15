@@ -10,6 +10,37 @@ Automates the S-TEC training flow in Selenium, collects module URLs from the All
    - `user`
    - `password`
 
+## Running the app
+* Dependencies: Python 3.12, Chrome, and an S-TEC account.
+
+1. Download the repository and navigate to the project directory.
+``` bash
+git clone https://github.com/Nsh-GaMeS/S-tecker
+cd S-tecker
+```
+
+or download the ZIP and extract it.
+2. Create and activate a virtual environment.
+``` bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+3. Install dependencies.
+``` bash
+pip install -r requirements.txt
+```
+4. Create a `.env` file in the project root with your S-TEC credentials:
+```
+user=your_username
+password=your_password
+```
+5. Run the main script to start the full flow:
+``` bash
+python main.py
+```
+
+And thats it! The app will log in, and one by one, start each module. It will do all the incomplete modules by default, but you can also specify a starting module or a direct module link if you want to run just one.
+
 ## Usage
 
 ### Collect module links
