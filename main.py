@@ -24,12 +24,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="S-TEC module orchestrator")
     parser.add_argument(
         "--workers",
+        "-w",
         type=int,
         default=1,
         help="Number of parallel module workers to run",
     )
     parser.add_argument(
         "--skip-collect",
+        "-sc",
         action="store_true",
         help="Skip refreshing module_links.txt and reuse the existing file",
     )
