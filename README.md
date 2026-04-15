@@ -43,9 +43,18 @@ Run:
 python main.py
 ```
 
-This script collects module links and then starts quiz automation for every fourth module link, which matches the page layout where only every fourth link points to a module.
+This script first runs `link_graber.py` to refresh `module_links.txt`, then launches `one-module.py` for each saved module link.
+
+You can parallelize the module runs with:
+
+```bash
+python main.py --workers 4
+```
+
+Use `--skip-collect` if you already have a fresh `module_links.txt` and want to skip the collection step.
 
 ## Notes
 
 - The module list path is shared across scripts so reading and writing stays consistent.
 - Logging is enabled with timestamps so you can trace login, navigation, filtering, and save steps.
+- The worker count controls how many module-runner subprocesses are active at once.

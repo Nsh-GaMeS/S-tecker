@@ -8,7 +8,11 @@ import time
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import NoSuchWindowException, StaleElementReferenceException, TimeoutException, NoSuchElementException
 import re
+import logging
 from scraper_paths import read_module_links
+
+
+logger = logging.getLogger("s_tec_scraper")
 
 def start_quiz(driver, module_url):
     wait = WebDriverWait(driver, 10)
@@ -199,12 +203,23 @@ def extract_correct_answer(html_content):
         return match.group(1)  # Return the value(not the key/id of the element) of correctAnswerText
     return None
 
+
+def wait_for_next_question(driver, previous_answer_text, timeout=3):
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        current_answer_text = extract_correct_answer(driver.page_source)
+        if current_answer_text != previous_answer_text:
+            return True
+        time.sleep(0.2)
+
+    return False
+
 def do_question(driver, wait, module_url):
     try:
         # now we are in the quiz, we need to find the correct answer from the page source
         html_content = driver.page_source
         correct_answer_text = extract_correct_answer(html_content)
-        print(f"Correct answer text: {correct_answer_text}")
+        logger.info("Module %s correct answer: %s", module_url, correct_answer_text)
 
         if correct_answer_text is None:
             handles = driver.window_handles
@@ -227,24 +242,15 @@ def do_question(driver, wait, module_url):
                     pass
             return False  # Explicitly signal quiz finished
 
-        # Helper to safely get choice elements with retries
-        def get_choices(retries=3, delay=0.5):
-            for _ in range(retries):
-                try:
-                    return wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ol.choices li")))
-                except (StaleElementReferenceException, TimeoutException):
-                    time.sleep(delay)
-            # final attempt without wait
-            return driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
-
-        # Try a few times in case the DOM refreshes while we iterate/click
+        # Try once, then refresh the choice list once if the DOM shifts under us.
         target = (correct_answer_text or "").strip().lower()
         clicked = False
-        max_attempts = 3
+        clicked_choice_text = None
+        max_attempts = 2
         for attempt in range(max_attempts):
-            choices = get_choices()
+            choices = driver.find_elements(By.CSS_SELECTOR, "ol.choices li")
             if not choices:
-                time.sleep(0.5)
+                time.sleep(0.2)
                 continue
 
             for li in choices:
@@ -257,11 +263,13 @@ def do_question(driver, wait, module_url):
 
                 if target and target in li_text:
                     # Try clicking with resilience to stale references
+                    match_clicked = False
                     try:
                         span = li.find_element(By.CSS_SELECTOR, "label > span")
                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", span)
                         driver.execute_script("arguments[0].click();", span)
-                        print(f"Clicked span for correct answer: {correct_answer_text}")
+                        clicked_choice_text = li.text.strip()
+                        match_clicked = True
                     except (StaleElementReferenceException, NoSuchElementException):
                         # Re-find the specific li and retry a JS click sequence
                         try:
@@ -279,58 +287,64 @@ def do_question(driver, wait, module_url):
                                                 input_el = f.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
                                                 driver.execute_script("arguments[0].click();", input_el)
                                             except Exception as e:
-                                                print(f"Final fallback click failed: {e}")
-                                        print(f"Clicked fallback element for correct answer: {correct_answer_text}")
-                                        clicked = True
+                                                logger.warning("Final fallback click failed for %s: %s", correct_answer_text, e)
+                                        clicked_choice_text = f.text.strip()
+                                        match_clicked = True
                                         break
                                 except StaleElementReferenceException:
                                     continue
                         except Exception as e:
-                            print(f"Error during fallback click: {e}")
+                            logger.warning("Error during fallback click for %s: %s", correct_answer_text, e)
                     except Exception:
                         # generic fallback attempt on current element
                         try:
                             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", li)
                             driver.execute_script("arguments[0].click();", li)
-                            print(f"Clicked li for correct answer: {correct_answer_text}")
+                            clicked_choice_text = li.text.strip()
+                            match_clicked = True
                         except Exception as e:
-                            print(f"Failed to click matching choice element: {e}")
-                    clicked = True
+                            logger.warning("Failed to click matching choice element for %s: %s", correct_answer_text, e)
+                    clicked = match_clicked
+                    if clicked_choice_text and match_clicked:
+                        logger.info("Selected answer for %s: %s", module_url, clicked_choice_text)
                     break
 
             if clicked:
                 break
             else:
-                time.sleep(0.5)  # short pause then retry to account for DOM refresh
+                time.sleep(0.2)  # short pause then retry to account for DOM refresh
 
         if not clicked:
-            print(f"No matching choice found for: {correct_answer_text}")
+            logger.warning("No matching choice found for answer %s in %s", correct_answer_text, module_url)
 
         # submit the answer with retries to avoid stale element problems
         submit_clicked = False
-        for _ in range(3):
+        for _ in range(2):
             try:
                 submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#fakesubmit")))
                 submit_btn.click()
                 submit_clicked = True
                 break
             except (StaleElementReferenceException, TimeoutException):
-                time.sleep(0.5)
+                time.sleep(0.2)
             except Exception as e:
-                print(f"Unexpected error clicking submit: {e}")
+                logger.warning("Unexpected error clicking submit for %s: %s", module_url, e)
                 break
 
         if not submit_clicked:
-            print("Failed to click submit button (may already be processed).")
+            logger.warning("Failed to click submit button for %s (may already be processed)", module_url)
 
-        print(f"Answered quiz question for module: {module_url}")
+        if clicked_choice_text:
+            logger.info("Answered quiz question for %s with %s", module_url, clicked_choice_text)
+        else:
+            logger.info("Answered quiz question for module: %s", module_url)
 
-        time.sleep(2)  # wait a moment as the quiz processes the answer
+        wait_for_next_question(driver, correct_answer_text, timeout=2)
 
         return True  # Indicate there may be more questions
 
     except Exception as e:
-        print(f"Error during quiz for module {module_url}: {e}")
+        logger.exception("Error during quiz for module %s: %s", module_url, e)
         # Let caller handle the termination; return False to move to next module
         return False
 # def do_question(driver, wait, module_url):

@@ -1,16 +1,17 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-import time
-import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+import argparse
 import logging
-from dotenv import load_dotenv
-from reader import start_quiz
-from scraper_paths import MODULE_LINKS_PATH, write_module_links
+import subprocess
+import sys
 
-load_dotenv()
+from scraper_paths import MODULE_LINKS_PATH, read_module_links
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+LINK_GRABBER_SCRIPT = SCRIPT_DIR / "link_graber.py"
+ONE_MODULE_SCRIPT = SCRIPT_DIR / "one-module.py"
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,121 +19,95 @@ logging.basicConfig(
 )
 logger = logging.getLogger("s_tec_scraper")
 
-# Configure Chrome to avoid bot detection
-chrome_options = Options()
-chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-chrome_options.add_experimental_option('useAutomationExtension', False)
-chrome_options.add_argument('--disable-gpu')
-chrome_options.add_argument('--no-sandbox')
-chrome_options.add_argument('--disable-dev-shm-usage')
-# Add user agent to look more like a real browser
-chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36')
 
-# Initialize the Chrome WebDriver with options
-driver = webdriver.Chrome(options=chrome_options)
-
-# Remove webdriver property to avoid detection
-driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-    'source': '''
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined
-        })
-    '''
-})
-
-# This is part 1 - Login and navigate to all modules page
-
-# Open s-tec login page
-driver.get("https://na.s-tec.shimano.com/login")
-logger.info("Opened s-tec login page")
-
-# wait until the username and password fields are visible(checking the xpath the fields)
-wait = WebDriverWait(driver, 10)
-username_field = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="user_name"]')))
-password_field = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="password"]')))
-
-# Enter username and password
-username_field.send_keys(os.getenv("user"))
-password_field.send_keys(os.getenv("password"))
-
-# find and click the login button
-submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="signinform"]/fieldset[2]/div/button')))
-submit_button.click()
-logger.info("Clicked login button")
-
-# wait for page to load after login
-wait.until(EC.url_changes("https://na.s-tec.shimano.com/login"))
-logger.info("Logged in successfully")
-
-# Add extra wait to ensure page fully loads and overlays disappear
-time.sleep(2)
-
-logger.info("Opening training menu")
-training_dropdown = wait.until(
-    EC.element_to_be_clickable(
-        (
-            By.XPATH,
-            '//*[@id="mainNav"]//a[contains(translate(normalize-space(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "training")]'
-        )
+def parse_args():
+    parser = argparse.ArgumentParser(description="S-TEC module orchestrator")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of parallel module workers to run",
     )
-)
-driver.execute_script("arguments[0].click();", training_dropdown)
-logger.info("Training menu opened")
-
-all_modules_option = wait.until(
-    EC.element_to_be_clickable(
-        (
-            By.XPATH,
-            '//*[@id="mainNav"]//a[contains(translate(normalize-space(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "all modules")]'
-        )
+    parser.add_argument(
+        "--skip-collect",
+        action="store_true",
+        help="Skip refreshing module_links.txt and reuse the existing file",
     )
-)
-driver.execute_script("arguments[0].click();", all_modules_option)
-logger.info("Opened all modules page")
+    return parser.parse_args()
 
 
-# This is part 2 - Collect and save all module links
+def stream_command(command, label):
+    logger.info("Starting %s: %s", label, " ".join(command))
+    process = subprocess.Popen(
+        command,
+        cwd=SCRIPT_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
 
-wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#modules a[href*='/module/composite/']")))
-module_links_section = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#modules")))
-anchor_elements = module_links_section.find_elements(By.CSS_SELECTOR, "a[href]")
+    assert process.stdout is not None
+    for line in process.stdout:
+        logger.info("[%s] %s", label, line.rstrip())
 
-raw_hrefs = []
-for anchor in anchor_elements:
-    href = anchor.get_attribute("href")
-    if not href or "/module/composite/" not in href:
-        continue
-    raw_hrefs.append(href.rstrip("/"))
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(f"{label} failed with exit code {return_code}")
 
-module_hrefs = list(dict.fromkeys(raw_hrefs))
-logger.info(
-    "Found %s anchors, %s module links after filtering, %s unique links",
-    len(anchor_elements),
-    len(raw_hrefs),
-    len(module_hrefs),
-)
 
-if not module_hrefs:
-    raise RuntimeError("No module links were found on the all modules page")
+def collect_module_links():
+    stream_command([sys.executable, str(LINK_GRABBER_SCRIPT)], "collector")
 
-logger.info("Saving %s module links to %s", len(module_hrefs), MODULE_LINKS_PATH)
-write_module_links(module_hrefs)
 
-for href in module_hrefs:
-    logger.info(href)
+def load_module_links():
+    module_links = read_module_links()
+    if not module_links:
+        raise ValueError(f"No module links available in {MODULE_LINKS_PATH}")
 
-# This is part 3 - Open a module link in a new tab and start the quiz
-# side note - adding a progress bar would be cool.
-offset = 4
-# for href in module_hrefs:
-for module in module_hrefs[::offset]:
-    start_quiz(driver, module)
-    logger.info("Completed module: %s", module)
-    # Optional: Add a delay between modules to mimic human behavior
-    time.sleep(5)
+    logger.info("Loaded %s module links from %s", len(module_links), MODULE_LINKS_PATH)
+    return module_links
 
-# Keep browser open to inspect
-input("\nPress Enter to close browser...")
-driver.quit()
 
+def launch_worker(module_link, worker_id):
+    worker_label = f"worker-{worker_id}"
+    command = [
+        sys.executable,
+        str(ONE_MODULE_SCRIPT),
+        "--module-link",
+        module_link,
+        "--no-prompt",
+    ]
+    stream_command(command, worker_label)
+    return module_link
+
+
+def main():
+    args = parse_args()
+    if args.workers < 1:
+        raise ValueError("--workers must be at least 1")
+
+    if not args.skip_collect:
+        logger.info("Refreshing module list with %s", LINK_GRABBER_SCRIPT.name)
+        collect_module_links()
+    else:
+        logger.info("Skipping collection and reusing %s", MODULE_LINKS_PATH)
+
+    module_links = load_module_links()
+    worker_count = min(args.workers, len(module_links))
+    logger.info("Dispatching %s module(s) across %s worker(s)", len(module_links), worker_count)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(launch_worker, module_link, index + 1): module_link
+            for index, module_link in enumerate(module_links)
+        }
+
+        for future in as_completed(futures):
+            module_link = futures[future]
+            future.result()
+            logger.info("Completed module: %s", module_link)
+
+
+if __name__ == "__main__":
+    main()

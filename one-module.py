@@ -12,10 +12,11 @@ import argparse
 from scraper_paths import read_module_links
 
 
-argparse = argparse.ArgumentParser(description='S-TEC Quiz Automation')
-argparse.add_argument('--start-module', type=int, default=1, help='Module number to start from (default: 1)')
-argparse.add_argument('--module-link', '-ml', type=str, help='Direct link to the module to start from (overrides --start-module)')
-args = argparse.parse_args()
+parser = argparse.ArgumentParser(description='S-TEC Quiz Automation')
+parser.add_argument('--start-module', type=int, default=1, help='Module number to start from (default: 1)')
+parser.add_argument('--module-link', '-ml', type=str, help='Direct link to the module to start from (overrides --start-module)')
+parser.add_argument('--no-prompt', action='store_true', help='Exit without waiting for Enter after the module completes')
+args = parser.parse_args()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,9 +48,6 @@ driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
         })
     '''
 })
-
-args = argparse.parse_args()
-
 
 def resolve_module_url(parsed_args):
     if parsed_args.module_link:
@@ -97,5 +95,6 @@ time.sleep(2)
 start_quiz(driver, module_url)
 
 # Keep browser open to inspect
-input("\nPress Enter to close browser...")
+if not args.no_prompt:
+    input("\nPress Enter to close browser...")
 driver.quit()
