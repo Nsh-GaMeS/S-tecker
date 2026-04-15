@@ -58,3 +58,7 @@ Use `--skip-collect` if you already have a fresh `module_links.txt` and want to 
 - The module list path is shared across scripts so reading and writing stays consistent.
 - Logging is enabled with timestamps so you can trace login, navigation, filtering, and save steps.
 - The worker count controls how many module-runner subprocesses are active at once.
+
+## Developer Docs
+
+- See `CODE_OVERVIEW.md` for architecture notes, file-by-file responsibilities, and a logger guide with log-reading commands.
