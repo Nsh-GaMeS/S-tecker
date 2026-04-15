@@ -20,6 +20,7 @@ cd S-tecker
 ```
 
 or download the ZIP and extract it.
+
 2. Create and activate a virtual environment.
 ``` bash
 python -m venv venv
