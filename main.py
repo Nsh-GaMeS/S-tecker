@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib.util import find_spec
 from pathlib import Path
 import argparse
 import logging
@@ -11,6 +12,7 @@ from scraper_paths import MODULE_LINKS_PATH, read_module_links
 SCRIPT_DIR = Path(__file__).resolve().parent
 LINK_GRABBER_SCRIPT = SCRIPT_DIR / "link_graber.py"
 ONE_MODULE_SCRIPT = SCRIPT_DIR / "one-module.py"
+VENV_PYTHON = SCRIPT_DIR / "venv" / "bin" / "python"
 
 
 logging.basicConfig(
@@ -18,6 +20,16 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger("s_tec_scraper")
+
+
+def resolve_python_executable():
+    if find_spec("selenium") is not None:
+        return sys.executable
+
+    if VENV_PYTHON.exists():
+        return str(VENV_PYTHON)
+
+    return sys.executable
 
 
 def parse_args():
@@ -59,7 +71,7 @@ def stream_command(command, label):
 
 
 def collect_module_links():
-    stream_command([sys.executable, str(LINK_GRABBER_SCRIPT)], "collector")
+    stream_command([resolve_python_executable(), str(LINK_GRABBER_SCRIPT)], "collector")
 
 
 def load_module_links():
@@ -74,7 +86,7 @@ def load_module_links():
 def launch_worker(module_link, worker_id):
     worker_label = f"worker-{worker_id}"
     command = [
-        sys.executable,
+        resolve_python_executable(),
         str(ONE_MODULE_SCRIPT),
         "--module-link",
         module_link,

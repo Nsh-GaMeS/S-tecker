@@ -1,3 +1,24 @@
+from importlib.util import find_spec
+from pathlib import Path
+import os
+import sys
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = SCRIPT_DIR / "venv" / "bin" / "python"
+
+
+def bootstrap_python():
+    if find_spec("selenium") is not None:
+        return
+
+    if VENV_PYTHON.exists() and os.environ.get("S_TEC_SCRAPER_BOOTSTRAPPED") != "1":
+        os.environ["S_TEC_SCRAPER_BOOTSTRAPPED"] = "1"
+        os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), *sys.argv])
+
+
+bootstrap_python()
+
 from reader import start_quiz
 import time
 from selenium import webdriver
