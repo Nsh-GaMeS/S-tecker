@@ -8,6 +8,7 @@ import time
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import NoSuchWindowException, StaleElementReferenceException, TimeoutException, NoSuchElementException
 import re
+from scraper_paths import read_module_links
 
 def start_quiz(driver, module_url):
     wait = WebDriverWait(driver, 10)
@@ -471,8 +472,7 @@ def main():
     driver = webdriver.Chrome(options=chrome_options)
 
     # Example usage
-    with open("module_links.txt", "r") as file:
-        module_urls = [line.strip() for line in file.readlines()]
+    module_urls = read_module_links()
 
     start_quiz(driver, module_urls[0])  # Start quiz for the first module link
 

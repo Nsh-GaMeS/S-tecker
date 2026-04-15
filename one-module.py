@@ -6,14 +6,22 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 import os
+import logging
 from dotenv import load_dotenv  
 import argparse
+from scraper_paths import read_module_links
 
 
 argparse = argparse.ArgumentParser(description='S-TEC Quiz Automation')
 argparse.add_argument('--start-module', type=int, default=1, help='Module number to start from (default: 1)')
 argparse.add_argument('--module-link', '-ml', type=str, help='Direct link to the module to start from (overrides --start-module)')
 args = argparse.parse_args()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger("s_tec_scraper")
 
 load_dotenv()
 
@@ -47,8 +55,7 @@ def resolve_module_url(parsed_args):
     if parsed_args.module_link:
         return parsed_args.module_link
 
-    with open("module_links.txt", "r") as file:
-        module_urls = [line.strip() for line in file.readlines() if line.strip()]
+    module_urls = read_module_links()
 
     if not module_urls:
         raise ValueError("No module links available in module_links.txt")
@@ -64,7 +71,7 @@ def resolve_module_url(parsed_args):
 # Open s-tec login page
 module_url = resolve_module_url(args)
 driver.get(module_url)
-print("Opened s-tec module page", module_url)
+logger.info("Opened s-tec module page: %s", module_url)
 
 # wait until the username and password fields are visible(checking the xpath the fields)
 wait = WebDriverWait(driver, 10)
@@ -78,11 +85,11 @@ password_field.send_keys(os.getenv("password"))
 # find and click the login button
 submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="signinform"]/fieldset[2]/div/button')))
 submit_button.click()
-print("Clicked login button")
+logger.info("Clicked login button")
 
 # wait for page to load after login
 wait.until(EC.url_changes("https://na.s-tec.shimano.com/login"))
-print("Logged in successfully")
+logger.info("Logged in successfully")
 
 # Add extra wait to ensure page fully loads and overlays disappear
 time.sleep(2)

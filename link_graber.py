@@ -7,7 +7,6 @@ import time
 import os
 import logging
 from dotenv import load_dotenv
-from reader import start_quiz
 from scraper_paths import MODULE_LINKS_PATH, write_module_links
 
 load_dotenv()
@@ -122,17 +121,4 @@ write_module_links(module_hrefs)
 for href in module_hrefs:
     logger.info(href)
 
-# This is part 3 - Open a module link in a new tab and start the quiz
-# side note - adding a progress bar would be cool.
-offset = 4
-# for href in module_hrefs:
-for module in module_hrefs[::offset]:
-    start_quiz(driver, module)
-    logger.info("Completed module: %s", module)
-    # Optional: Add a delay between modules to mimic human behavior
-    time.sleep(5)
-
-# Keep browser open to inspect
-input("\nPress Enter to close browser...")
 driver.quit()
-
