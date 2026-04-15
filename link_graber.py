@@ -38,6 +38,115 @@ logging.basicConfig(
 )
 logger = logging.getLogger("s_tec_scraper")
 
+
+def parse_percent(text_value):
+    if not text_value:
+        return None
+
+    stripped = text_value.replace("%", "").strip()
+    if not stripped:
+        return None
+
+    try:
+        return float(stripped)
+    except ValueError:
+        return None
+
+
+def looks_completed_status(text_blob):
+    normalized = (text_blob or "").strip().lower()
+    if not normalized:
+        return False
+
+    if "not completed" in normalized:
+        return False
+
+    completion_tokens = [
+        "completed",
+        "complete",
+        "passed",
+        "certified",
+        "finished",
+        "done",
+        "100%",
+        "100 %",
+    ]
+    return any(token in normalized for token in completion_tokens)
+
+
+def is_completed_module(driver, anchor):
+    # Gather metadata from the link and its nearest module container.
+    completion_data = driver.execute_script(
+        """
+        const anchor = arguments[0];
+        const card = anchor.closest('[data-module-id], .module, .module-item, .module-card, li, tr, .row') || anchor;
+
+        const textBits = [];
+        const pushText = (v) => {
+            if (v && typeof v === 'string') {
+                const t = v.trim();
+                if (t) textBits.push(t);
+            }
+        };
+
+        pushText(anchor.textContent || '');
+        pushText(anchor.getAttribute('title') || '');
+        pushText(anchor.getAttribute('aria-label') || '');
+        pushText(card.textContent || '');
+
+        const classBits = [];
+        if (anchor.className) classBits.push(String(anchor.className));
+        if (card.className) classBits.push(String(card.className));
+
+        const ariaProgressNow = card.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow') || '';
+        const explicitProgress = card.querySelector('.progress, .progress-text, .progress-label')?.textContent || '';
+
+        return {
+            textBlob: textBits.join(' ').replace(/\\s+/g, ' ').trim(),
+            classBlob: classBits.join(' ').toLowerCase(),
+            ariaProgressNow: String(ariaProgressNow || '').trim(),
+            explicitProgress: String(explicitProgress || '').trim(),
+        };
+        """,
+        anchor,
+    )
+
+    text_blob = completion_data.get("textBlob", "")
+    class_blob = completion_data.get("classBlob", "")
+    aria_progress_now = completion_data.get("ariaProgressNow", "")
+    explicit_progress = completion_data.get("explicitProgress", "")
+
+    if "incomplete" in class_blob or "not-complete" in class_blob:
+        return False
+
+    class_completion_tokens = [
+        "completed",
+        "complete",
+        "is-complete",
+        "module-complete",
+        "status-complete",
+        "passed",
+    ]
+    if any(token in class_blob for token in class_completion_tokens):
+        return True
+
+    if looks_completed_status(text_blob):
+        return True
+
+    if looks_completed_status(explicit_progress):
+        return True
+
+    aria_progress_value = parse_percent(aria_progress_now)
+    explicit_progress_value = parse_percent(explicit_progress)
+
+    if aria_progress_value is not None and aria_progress_value >= 100:
+        return True
+
+    if explicit_progress_value is not None and explicit_progress_value >= 100:
+        return True
+
+    return False
+
 # Configure Chrome to avoid bot detection
 chrome_options = Options()
 chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -119,16 +228,23 @@ module_links_section = wait.until(EC.presence_of_element_located((By.CSS_SELECTO
 anchor_elements = module_links_section.find_elements(By.CSS_SELECTOR, "a[href]")
 
 raw_hrefs = []
+completed_count = 0
 for anchor in anchor_elements:
     href = anchor.get_attribute("href")
     if not href or "/module/composite/" not in href:
         continue
+
+    if is_completed_module(driver, anchor):
+        completed_count += 1
+        continue
+
     raw_hrefs.append(href.rstrip("/"))
 
 module_hrefs = list(dict.fromkeys(raw_hrefs))
 logger.info(
-    "Found %s anchors, %s module links after filtering, %s unique links",
+    "Found %s anchors, skipped %s completed modules, %s module links after filtering, %s unique links",
     len(anchor_elements),
+    completed_count,
     len(raw_hrefs),
     len(module_hrefs),
 )
